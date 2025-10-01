@@ -5,6 +5,7 @@ import os
 import json
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.lib.utils import simpleSplit
 import re
 
 # --- ChatGPT API Configuration ---
@@ -126,20 +127,38 @@ def generate_image(prompt):
 def save_story_pdf(story_segments, filename="storybook.pdf"):
     c = canvas.Canvas(filename, pagesize=letter)
     width, height = letter
+
+    title_margin = 50
+    text_margin = 50
+    bottom_margin = 70
+    line_height = 16
+    text_width = width - (2 * text_margin)
+
     c.setFont("Helvetica-Bold", 18)
-    c.drawString(100, height - 50, "📖 StoryWorlds Adventure")
+    c.drawString(text_margin, height - title_margin, "📖 StoryWorlds Adventure")
     c.setFont("Helvetica", 12)
-    y = height - 100
-    for i, segment in enumerate(story_segments):
+
+    y = height - title_margin - 30
+
+    for segment in story_segments:
         lines = segment.split("\n")
-        for line in lines:
-            if y < 80:  # new page if space runs out
-                c.showPage()
-                c.setFont("Helvetica", 12)
-                y = height - 80
-            c.drawString(50, y, line.strip())
-            y -= 18
-        y -= 10  # space between segments
+        for raw_line in lines:
+            line = raw_line.strip()
+            if not line:
+                y -= line_height
+                continue
+
+            wrapped_lines = simpleSplit(line, "Helvetica", 12, text_width)
+            for wrapped_line in wrapped_lines:
+                if y < bottom_margin:
+                    c.showPage()
+                    c.setFont("Helvetica", 12)
+                    y = height - text_margin
+                c.drawString(text_margin, y, wrapped_line)
+                y -= line_height
+
+        y -= line_height  # space between segments
+
     c.save()
     return filename
 
