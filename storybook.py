@@ -2,14 +2,32 @@
 import streamlit as st
 from openai import OpenAI
 import base64
+import json
 import os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 # --- ChatGPT API Configuration ---
-# Add your OpenAI API key below when you get one.
-# Example: OPENAI_API_KEY = 'sk-...'
-OPENAI_API_KEY = ''  # <-- Add your API key here when available
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "openai_config.json")
+
+
+def load_openai_api_key(config_path: str) -> str:
+    """Load the OpenAI key from config file or environment variable."""
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+        except json.JSONDecodeError as exc:
+            print(f"Warning: Failed to parse {config_path}: {exc}")
+        else:
+            key = config.get("openai_api_key") or config.get("OPENAI_API_KEY")
+            if isinstance(key, str) and key.strip():
+                return key.strip()
+    # Fallback to environment variable when config file missing or empty
+    return os.getenv("OPENAI_API_KEY", "")
+
+
+OPENAI_API_KEY = load_openai_api_key(CONFIG_FILE)
 
 # Create the OpenAI client only if API key is provided
 client = None
