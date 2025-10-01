@@ -1,2 +1,4 @@
 .venv
 storybook.pdf
+openai_config.json
+.DS_Store

@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
 import streamlit as st
 from openai import OpenAI
 import base64
-import json
 import os
+import json
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+import re
 
 # --- ChatGPT API Configuration ---
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "openai_config.json")
@@ -69,43 +69,57 @@ def generate_story_segment(character, sidekick, setting, progress, choice):
 
     Output format:
     1. Story Segment (3–4 sentences)
-    2. Choices (numbered, simple phrasing)
+    2. Choices (numbered, simple phrasing, exactly 2 options)
     3. Encouragement/Feedback (1 supportive line)
     """
-    if client:
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",  # Replace with gpt-5 if available
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=350,
-        )
-        return response.choices[0].message.content
+    response = client.chat.completions.create(
+        model="gpt-4.1-mini",  # Replace with gpt-5 if available
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=350,
+    )
+    return response.choices[0].message.content
+
+def extract_choices(story_output):
+    # Find the 'Choices' section and extract exactly 2 options
+    match = re.search(r"Choices?:\s*(1\..*?)(?:\n2\..*?)(?:\n3\..*?)?", story_output, re.DOTALL)
+    if match:
+        choices_text = match.group(1)
+        # Find all numbered choices
+        choices = re.findall(r"\d+\.\s*(.*)", story_output)
+        return choices[:2]  # Only return the first 2 choices
     else:
-        return "[OpenAI API key not set] Example story: Alex and Spark explore the Magic Forest. What will they do next? Choices: 1. Climb a tree 2. Find a river 3. Meet a fairy. Great job choosing!"
+        # Fallback: return generic options
+        return ["Option 1", "Option 2"]
 
 # --- Function to generate TTS ---
 def generate_tts(text, filename="narration.mp3"):
-    if client:
-        response = client.audio.speech.create(
-            model="gpt-4o-mini-tts",
-            voice="alloy",
-            input=text,
-        )
-        with open(filename, "wb") as f:
-            f.write(response.read())
-        return filename
-    else:
-        return None
+    response = client.audio.speech.create(
+        model="gpt-4o-mini-tts",
+        voice="alloy",
+        input=text,
+    )
+    with open(filename, "wb") as f:
+        f.write(response.read())
+    return filename
 
 # --- Function to generate image ---
 def generate_image(prompt):
-    if client:
+    try:
         response = client.images.generate(
-            model="gpt-image-1",
+            model="dall-e-3",
             prompt=prompt,
-            size="512x512"
+            size="256x256",
         )
-        return response.data[0].url
-    else:
+        # Debug: Show the full response in the app for troubleshooting
+    #    st.info(f"OpenAI image response: {response}")
+        # Check for data and URL
+        if hasattr(response, 'data') and response.data[0]: #and hasattr(response.data[0], 'url'):
+            return f"{response.data[0].url}" 
+        else:
+            st.warning("Image response did not contain a valid URL. Check your API access and quota.")
+            return None
+    except Exception as e:
+        st.warning(f"Image generation failed: {e}")
         return None
 
 # --- Function to export storybook as PDF ---
@@ -129,12 +143,24 @@ def save_story_pdf(story_segments, filename="storybook.pdf"):
     c.save()
     return filename
 
+# --- Generate illustration if enabled ---
+if enable_images:
+    st.subheader("Illustration")
+    img_url = generate_image(f"A children's story illustration of {character} and {sidekick} in {setting}")
+    if img_url:
+        st.image(img_url, use_container_width=True)
+    else:
+        st.warning("No image was generated. Please try again, check your API usage, or review the debug info above.")
+
 # --- Display current story ---
 st.subheader("Your Story")
 story_output = generate_story_segment(
     character, sidekick, setting, st.session_state.story_progress, st.session_state.last_choice
 )
 st.write(story_output)
+
+# --- Extract choices from story output ---
+choices = extract_choices(story_output)
 
 # --- Generate & play TTS if enabled ---
 if enable_tts:
@@ -143,25 +169,15 @@ if enable_tts:
         with open(filename, "rb") as f:
             audio_bytes = f.read()
         st.audio(audio_bytes, format="audio/mp3")
-    else:
-        st.warning("TTS is unavailable without an OpenAI API key.")
 
-# --- Generate illustration if enabled ---
-if enable_images:
-    st.subheader("Illustration")
-    img_url = generate_image(f"A children's story illustration of {character} and {sidekick} in {setting}")
-    if img_url:
-        st.image(img_url, use_container_width=True)
-    else:
-        st.warning("Image generation is unavailable without an OpenAI API key.")
 
 # --- Capture choice ---
 st.subheader("Make a Choice")
-choice = st.radio("What should happen next?", ["1", "2", "3"])
+choice = st.radio("What should happen next?", choices)
 
 if st.button("Continue Story"):
     st.session_state.last_choice = choice
-    st.session_state.story_progress += f"\nChild chose option {choice}."
+    st.session_state.story_progress += f"\nChild chose option: {choice}."
     st.session_state.history.append(story_output)
     st.rerun()
 
