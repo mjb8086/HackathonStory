@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import streamlit as st
 from openai import OpenAI
 import base64
