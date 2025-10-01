@@ -108,7 +108,7 @@ def generate_image(prompt):
         response = client.images.generate(
             model="dall-e-3",
             prompt=prompt,
-            size="256x256",
+            size="1024x1024",
         )
         # Debug: Show the full response in the app for troubleshooting
     #    st.info(f"OpenAI image response: {response}")
