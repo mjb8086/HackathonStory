@@ -2,38 +2,15 @@ import streamlit as st
 from openai import OpenAI
 import base64
 import os
-import json
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from reportlab.lib.utils import simpleSplit
-import re
 
 # --- ChatGPT API Configuration ---
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "openai_config.json")
+# Your OpenAI API key is set below and used for all OpenAI features.
+OPENAI_API_KEY = ''  # <-- Set in line 11
 
-
-def load_openai_api_key(config_path: str) -> str:
-    """Load the OpenAI key from config file or environment variable."""
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config = json.load(f)
-        except json.JSONDecodeError as exc:
-            print(f"Warning: Failed to parse {config_path}: {exc}")
-        else:
-            key = config.get("openai_api_key") or config.get("OPENAI_API_KEY")
-            if isinstance(key, str) and key.strip():
-                return key.strip()
-    # Fallback to environment variable when config file missing or empty
-    return os.getenv("OPENAI_API_KEY", "")
-
-
-OPENAI_API_KEY = load_openai_api_key(CONFIG_FILE)
-
-# Create the OpenAI client only if API key is provided
-client = None
-if OPENAI_API_KEY:
-    client = OpenAI(api_key=OPENAI_API_KEY)
+# Create the OpenAI client using the API key from line 11
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 st.set_page_config(page_title="StoryWorlds", page_icon="📖", layout="centered")
 st.title("📖 StoryWorlds: Interactive Adventures")
@@ -95,15 +72,15 @@ def generate_tts(text, filename="narration.mp3"):
 def generate_image(prompt):
     try:
         response = client.images.generate(
-            model="dall-e-3",
+            model="gpt-image-1",
             prompt=prompt,
-            size="1024x1024",
+            size="1024x1024"
         )
         # Debug: Show the full response in the app for troubleshooting
-    #    st.info(f"OpenAI image response: {response}")
+        st.info(f"OpenAI image response: {response}")
         # Check for data and URL
-        if hasattr(response, 'data') and response.data[0]: #and hasattr(response.data[0], 'url'):
-            return f"{response.data[0].url}" 
+        if hasattr(response, 'data') and response.data and hasattr(response.data[0], 'url'):
+            return response.data[0].url
         else:
             st.warning("Image response did not contain a valid URL. Check your API access and quota.")
             return None
@@ -115,109 +92,55 @@ def generate_image(prompt):
 def save_story_pdf(story_segments, filename="storybook.pdf"):
     c = canvas.Canvas(filename, pagesize=letter)
     width, height = letter
-
-    title_margin = 50
-    text_margin = 50
-    bottom_margin = 70
-    line_height = 16
-    text_width = width - (2 * text_margin)
-
     c.setFont("Helvetica-Bold", 18)
-    c.drawString(text_margin, height - title_margin, "📖 StoryWorlds Adventure")
+    c.drawString(100, height - 50, "📖 StoryWorlds Adventure")
     c.setFont("Helvetica", 12)
-
-    y = height - title_margin - 30
-
-    for segment in story_segments:
+    y = height - 100
+    for i, segment in enumerate(story_segments):
         lines = segment.split("\n")
-        for raw_line in lines:
-            line = raw_line.strip()
-            if not line:
-                y -= line_height
-                continue
-
-            wrapped_lines = simpleSplit(line, "Helvetica", 12, text_width)
-            for wrapped_line in wrapped_lines:
-                if y < bottom_margin:
-                    c.showPage()
-                    c.setFont("Helvetica", 12)
-                    y = height - text_margin
-                c.drawString(text_margin, y, wrapped_line)
-                y -= line_height
-
-        y -= line_height  # space between segments
-
+        for line in lines:
+            if y < 80:  # new page if space runs out
+                c.showPage()
+                c.setFont("Helvetica", 12)
+                y = height - 80
+            c.drawString(50, y, line.strip())
+            y -= 18
+        y -= 10  # space between segments
     c.save()
     return filename
 
-# --- Helper to extract story text, choices, and feedback ---
+# --- Helper to extract choices and feedback from story output ---
 def parse_story_output(story_output):
     lines = story_output.split('\n')
     story_lines = []
     choices = []
     feedback = ""
-    collecting_choices = False
-
-    for raw_line in lines:
-        line = raw_line.strip()
-        if not line:
+    in_choices = False
+    for line in lines:
+        line = line.strip()
+        if line.lower().startswith("choices") or line.startswith("2."):
+            in_choices = True
             continue
-
-        lowered = line.lower()
-
-        if not collecting_choices and lowered.startswith('choices'):
-            collecting_choices = True
-            inline = re.findall(r"(?:\d+[\.)]|[-*])\s*([^\n\r]+)", line)
-            for opt in inline:
-                opt = opt.strip()
-                if opt:
-                    choices.append(opt)
-            continue
-
-        marker_match = re.match(r"^(?:[-*]|\d+[\.)]|[A-Za-z][\.)])\s*(.+)", line)
-
-        if collecting_choices:
-            if marker_match:
-                choices.append(marker_match.group(1).strip())
-                continue
-
-            if not feedback:
-                feedback = re.sub(r"^(?:encouragement|feedback)[:\-\s]*", '', line, flags=re.IGNORECASE).strip() or line
-            collecting_choices = False
-            continue
-
-        if marker_match:
-            collecting_choices = True
-            choices.append(marker_match.group(1).strip())
-            continue
-
-        if lowered.startswith('encouragement') or lowered.startswith('feedback'):
-            if not feedback:
-                feedback = re.sub(r"^(?:encouragement|feedback)[:\-\s]*", '', line, flags=re.IGNORECASE).strip()
-            continue
-
-        if not lowered.startswith('output format'):
-            story_lines.append(line)
-
-    if len(choices) < 2:
-        choices.extend(["Option 1", "Option 2"][len(choices):2])
-
-    return '\n'.join(story_lines), choices[:4], feedback
+        if in_choices:
+            if line and (line[0].isdigit() and line[1] in ['.', ')']):
+                # e.g. "1. Go to the forest" or "2) Help Spark"
+                choice_text = line[2:].strip()
+                choices.append(choice_text)
+            elif line:
+                # If not a choice, treat as feedback
+                feedback = line
+                in_choices = False
+        else:
+            if line and not line.lower().startswith("output format"):
+                story_lines.append(line)
+    story_segment = '\n'.join(story_lines)
+    return story_segment, choices, feedback
 
 # --- Display full story so far at the top ---
 st.subheader("Your Story So Far")
 if st.session_state.history:
     for i, segment in enumerate(st.session_state.history):
         st.markdown(f"**Step {i+1}:**\n{segment}")
-
-# --- Generate illustration if enabled ---
-if enable_images:
-    st.subheader("Illustration")
-    img_url = generate_image(f"A children's story illustration of {character} and {sidekick} in {setting}")
-    if img_url:
-        st.image(img_url, use_container_width=True)
-    else:
-        st.warning("No image was generated. Please try again, check your API usage, or review the debug info above.")
 
 # --- Display current story ---
 st.subheader("Current Story Segment")
@@ -237,6 +160,14 @@ if enable_tts:
             audio_bytes = f.read()
         st.audio(audio_bytes, format="audio/mp3")
 
+# --- Generate illustration if enabled ---
+if enable_images:
+    st.subheader("Illustration")
+    img_url = generate_image(f"A children's story illustration of {character} and {sidekick} in {setting}")
+    if img_url:
+        st.image(img_url, use_container_width=True)
+    else:
+        st.warning("No image was generated. Please try again, check your API usage, or review the debug info above.")
 
 # --- Capture choice ---
 st.subheader("Make a Choice")

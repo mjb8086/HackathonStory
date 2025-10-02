@@ -2,3 +2,5 @@
 storybook.pdf
 openai_config.json
 .DS_Store
+*.swp
+__pycache__/*
